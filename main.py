@@ -82,42 +82,16 @@ class SumoSimulation:
             self.created_vehicles = self.created_vehicles + 1
 
     def create_route(self, trip_id, server_start, server_end):
-        # Tentar encontrar uma rota válida
-        max_attempts = 10
-        attempts = 0
-        caminho = [random.choice(self.positions[server_start]), random.choice(self.positions[server_end])]
+        start_edge = random.choice(self.positions[server_start])
+        end_edge = random.choice(self.positions[server_end])
+
+        while start_edge == end_edge:
+            end_edge = random.choice(self.positions[server_end])
+
+        caminho = [start_edge,end_edge]
         
         traci.route.add(trip_id, caminho)
-        self.players_data[int(trip_id.split('_')[-2])] = {'start_edge': caminho[0],'end_edge':caminho[1],'trip_id':trip_id ,'coord': 0, 'flag': 1}
-
-
-    def update_vehicle_route(self, vehicle_id):
-        print(vehicle_id)
-        if vehicle_id:
-            try:
-                end_edge_i = self.players_data[vehicle_id]['end_edge']
-                print(end_edge_i)
-                print(self.players_data[vehicle_id])
-                print()
-                print(self.players_data)
-                time.sleep(12000)
-                x, y = traci.vehicle.getPosition(vehicle_id)
-                lon, lat = traci.simulation.convertGeo(x, y)
-
-                # Verifique a distância entre a posição atual e o destino
-                distance_to_end_edge = traci.simulation.getDistanceRoad(lon, lat, end_edge_i)
-
-                if distance_to_end_edge < 50.0:  # Defina uma distância de "chegada" adequada
-                    
-                    new_server_end = random.choice(list(self.positions.keys()))
-                    new_end_edge   = random.choice(self.positions[new_server_end])
-                    print(vehicle_id, new_end_edge)
-                    traci.vehicle.changeTarget(vehicle_id, new_end_edge)
-
-                    print("Rota atualizada: ", vehicle_id)
-            except:
-                return False
-        
+        self.players_data[int(trip_id.split('_')[-2])] = {'server_end':server_end,'start_edge': start_edge,'end_edge':end_edge,'trip_id':trip_id ,'coord': 0, 'flag': 1}
 
 
     def record_vehicle_data(self, writer, vehicle_id):
@@ -133,9 +107,27 @@ class SumoSimulation:
         # print(vehicle_id, ">>> Position: [", round(x), ", ", round(y), "]",
         #     "Speed:", speed_kmph, "km/h |")
 
+    def calculate_new_edge(self, vehicle_id):
+        player = int(vehicle_id.split("_")[-1])
+        print(player, vehicle_id)
+        server_end = random.choice(list(self.positions.keys()))
+        new_edge = random.choice(self.positions[server_end])
+        current_server = self.players_data[player]['server_end']
+        
+        while current_server == server_end:
+            server_end = random.choice(list(self.positions.keys()))
+
+        while new_edge == self.players_data[player]['end_edge']:
+            new_edge = random.choice(self.positions[server_end])
+
+        self.players_data[player]['end_edge'] = new_edge
+        self.players_data[player]['server_end'] = server_end
+
+        print("O veículo: ",vehicle_id, " foi rerroteado")
+        return new_edge
     
     def run_simulation(self):
-        traci.start(["sumo", "-c", self.config_file])
+        traci.start(["sumo-gui", "-c", self.config_file])
 
         with open("output.csv", mode='w', newline='') as output_file:
             column_names = ['dateandtime', 'veh_id', 'coord_x', 'coord_y', 'speed_kmph']
@@ -151,11 +143,18 @@ class SumoSimulation:
                 for vehicle_id in vehicles:
                     if vehicle_id != 0 and vehicle_id != '0':
                         self.record_vehicle_data(writer, vehicle_id)
-                        self.update_vehicle_route(vehicle_id)
+
+                        arrived = traci.vehicle.getRouteIndex(vehicle_id) == len(traci.vehicle.getRoute(vehicle_id))-1
+                    
+                        if arrived:
+                            # Calcular e definir uma nova rota para o veículo
+                            new_edge = self.calculate_new_edge(vehicle_id)
+                            traci.vehicle.changeTarget(vehicle_id, new_edge)
 
                 if traci.simulation.getTime() % self.spawn_interval == 0:
                     self.create_random_vehicle()
         traci.close()
+
 
 if __name__ == "__main__":
     sim = SumoSimulation()
