@@ -53,7 +53,7 @@ entry_points = [(1492.1710265251459,7139.450638527051),
 result_dict = {}
 
 # Número de edges mais próximas que você deseja coletar (5 neste caso)
-num_closest_edges = 5
+num_closest_edges = 10
 
 # Iterar sobre os pontos de entrada
 for point_id, (x, y) in enumerate(entry_points):

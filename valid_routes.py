@@ -1,18 +1,19 @@
 import traci
-import time
-import pytz
-import datetime
-import csv
-import random
 
-class SumoSimulation:
-    def __init__(self, config_file="luxembourg.sumocfg"):
-        self.config_file = config_file
-        self.spawn_interval = 5
-        self.created_vehicles = 0
-        self.n_players = 20
-        self.players_data = {}
-        self.positions = {0: ['-34191#5', '--34168#12', '-34168#11', '--34191#5', '-34652#1', '--34168#11', '-34168#12', '--34168#10', '-34652#0', '--34652#1'],
+# Inicialização do TraCI
+sumo_cmd = ['sumo', "-c", "luxembourg.sumocfg"]
+traci.start(sumo_cmd)
+
+# Função para verificar se uma rota é válida
+def is_route_valid(start_edge, end_edge):
+    try:
+        traci.simulation.findRoute(start_edge, end_edge)
+        return True
+    except traci.exceptions.TraCIException:
+        return False
+
+# Seu dicionário com as arestas mais próximas
+result_dict = {0: ['-34191#5', '--34168#12', '-34168#11', '--34191#5', '-34652#1', '--34168#11', '-34168#12', '--34168#10', '-34652#0', '--34652#1'],
             1: ['--34937', '-34375#2', '-34375#1', '-34937', '-34375#3', '-34375#0', '-35141#4', '-34770#4', '-34778#5', '-34778#4'],
             2: ['--34253#34', '-34253#35', '--34130', '-34253#34', '-34646', '--34253#33', '--34253#35', '-34253#33', '-34508#1', '--35279#0'],
             3: ['-35062#2', '--35062#3', '-34404', '--35062#2', '-34661', '-35062#1', '-35062#3', '--34661', '-35028#2', '-34898#9'],
@@ -51,112 +52,39 @@ class SumoSimulation:
             36: ['--35449', '-35449', '-34877#1', '--35433', '-34877#2', '-34877#0', '-35279#4', '--35279#4', '-35433', '-35062#3'], 
             37: ['--34526', '-34253#57', '--34253#57', '-34526', '-34253#56', '--35382#0', '-35382#1', '-35382#0', '--35382#1', '-35441']}
 
-    def get_datetime(self):
-        utc_now = pytz.utc.localize(datetime.datetime.utcnow())
-        currentDT = utc_now.astimezone(pytz.timezone("America/Belem"))
-        return currentDT.strftime("%Y-%m-%d %H:%M:%S")
+# Lista para armazenar as arestas problemáticas
+arestas_problematicas = []
 
-    def calculate_kmph(self, m_per_s):
-        return round(m_per_s * 3.6, 2)
-        
+# Lista para armazenar as arestas sem conexões
+arestas_sem_conexoes = []
 
-    def create_random_vehicle(self):
-        if self.created_vehicles < self.n_players:
+# Loop para testar todas as rotas possíveis
+for group_id, edges in result_dict.items():
+    for i in range(len(edges)):
+        start_edge = edges[i]
+        for j in range(i + 1, len(edges)):
+            end_edge = edges[j]
             
-            player = self.created_vehicles + 1
+            # Verifica se as arestas estão em grupos diferentes
+            if str(group_id) not in start_edge and str(group_id) not in end_edge:
+                print(f"Testando rota de {start_edge} para {end_edge}")
+                if not is_route_valid(start_edge, end_edge):
+                    print(f"Problema na rota: {start_edge} -> {end_edge}")
+                    arestas_problematicas.append((start_edge, end_edge))
 
-            server_start = random.choice(list(self.positions.keys()))
-            server_end = random.choice(list(self.positions.keys()))
-            
-            # Verifica se o servidor é igual ao destino e refaz a seleção
-            while server_start == server_end:
-                server_end = random.choice(list(self.positions.keys()))
+# Verifica as arestas que não têm conexões
+for group_id, edges in result_dict.items():
+    for edge in edges:
+        if not any(is_route_valid(edge, other_edge) for other_edge in edges if edge != other_edge):
+            print(f"Aresta sem conexões: {edge}")
+            arestas_sem_conexoes.append(edge)
 
-            vehicle_id = f"vehicle_{player}"
-            trip_id = f"trip_{player}_0"    
+# Imprime todas as arestas problemáticas
+print("Arestas problemáticas:")
+for start_edge, end_edge in arestas_problematicas:
+    print(f"{start_edge} -> {end_edge}")
 
-            self.create_route(trip_id, server_start, server_end)
-            traci.vehicle.add(vehicle_id, trip_id)
-            
-            print(f"Novo veículo criado: {vehicle_id}")
-            self.created_vehicles = self.created_vehicles + 1
-
-    def create_route(self, trip_id, server_start, server_end):
-        # Tentar encontrar uma rota válida
-        max_attempts = 10
-        attempts = 0
-        caminho = [random.choice(self.positions[server_start]), random.choice(self.positions[server_end])]
-        
-        traci.route.add(trip_id, caminho)
-        self.players_data[int(trip_id.split('_')[-2])] = {'start_edge': caminho[0],'end_edge':caminho[1],'trip_id':trip_id ,'coord': 0, 'flag': 1}
-
-
-    def update_vehicle_route(self, vehicle_id):
-        print(vehicle_id)
-        if vehicle_id:
-            try:
-                end_edge_i = self.players_data[vehicle_id]['end_edge']
-                print(end_edge_i)
-                print(self.players_data[vehicle_id])
-                print()
-                print(self.players_data)
-                time.sleep(12000)
-                x, y = traci.vehicle.getPosition(vehicle_id)
-                lon, lat = traci.simulation.convertGeo(x, y)
-
-                # Verifique a distância entre a posição atual e o destino
-                distance_to_end_edge = traci.simulation.getDistanceRoad(lon, lat, end_edge_i)
-
-                if distance_to_end_edge < 50.0:  # Defina uma distância de "chegada" adequada
-                    
-                    new_server_end = random.choice(list(self.positions.keys()))
-                    new_end_edge   = random.choice(self.positions[new_server_end])
-                    print(vehicle_id, new_end_edge)
-                    traci.vehicle.changeTarget(vehicle_id, new_end_edge)
-
-                    print("Rota atualizada: ", vehicle_id)
-            except:
-                return False
-        
-
-
-    def record_vehicle_data(self, writer, vehicle_id):
-        x, y = traci.vehicle.getPosition(vehicle_id)
-        lon, lat = traci.simulation.convertGeo(x, y)
-        speed_mps = traci.vehicle.getSpeed(vehicle_id)
-        speed_kmph = self.calculate_kmph(speed_mps)
-
-        data = [self.get_datetime(), vehicle_id, x, y, speed_kmph]
-        writer.writerow(data)
-
-        # print("Vehicle:", vehicle_id, "at datetime:", self.get_datetime())
-        # print(vehicle_id, ">>> Position: [", round(x), ", ", round(y), "]",
-        #     "Speed:", speed_kmph, "km/h |")
-
-    
-    def run_simulation(self):
-        traci.start(["sumo", "-c", self.config_file])
-
-        with open("output.csv", mode='w', newline='') as output_file:
-            column_names = ['dateandtime', 'veh_id', 'coord_x', 'coord_y', 'speed_kmph']
-            writer = csv.writer(output_file)
-            writer.writerow(column_names)
-
-            while traci.simulation.getMinExpectedNumber() > 0:
-                self.create_random_vehicle()
-
-                traci.simulationStep()
-                vehicles = traci.vehicle.getIDList()
-
-                for vehicle_id in vehicles:
-                    if vehicle_id != 0 and vehicle_id != '0':
-                        self.record_vehicle_data(writer, vehicle_id)
-                        self.update_vehicle_route(vehicle_id)
-
-                if traci.simulation.getTime() % self.spawn_interval == 0:
-                    self.create_random_vehicle()
-        traci.close()
-
-if __name__ == "__main__":
-    sim = SumoSimulation()
-    sim.run_simulation()
+# Imprime todas as arestas sem conexões
+print("Arestas sem conexões:")
+for edge in arestas_sem_conexoes:
+    print(edge)
